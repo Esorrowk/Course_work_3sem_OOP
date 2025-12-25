@@ -488,7 +488,177 @@ class MainWindow(QMainWindow):
         
         print("Приложение закрывается")
         event.accept()
+    def create_menu(self):
+        """Создание меню"""
+        menubar = self.menuBar()
+        
+        # Меню Файл
+        file_menu = menubar.addMenu("Файл")
+        file_menu.addAction("Создать", self.new_db)
+        file_menu.addAction("Открыть", self.load_db)
+        file_menu.addAction("Сохранить", self.save_db)
+        file_menu.addAction("Сохранить как", self.save_as_db)
+        file_menu.addAction("Объединить с...", self.merge_db)  # НОВОЕ
+        file_menu.addSeparator()
+        file_menu.addAction("Выход", self.close)
+        
+        # Меню Действия
+        action_menu = menubar.addMenu("Действия")
+        action_menu.addAction("Добавить студента", self.add_student)
+        action_menu.addAction("Редактировать студента", self.edit_student)
+        action_menu.addAction("Удалить студента", self.delete_student)
 
+    def create_toolbar(self):
+        """Создание панели инструментов"""
+        toolbar = self.addToolBar("Инструменты")
+        
+        # Добавляем кнопки на тулбар
+        toolbar.addAction("➕ Добавить", self.add_student)
+        toolbar.addAction("✏️ Редактировать", self.edit_student)
+        toolbar.addAction("🗑️ Удалить", self.delete_student)
+        toolbar.addSeparator()
+        toolbar.addAction("💾 Сохранить", self.save_db)
+        toolbar.addAction("📂 Открыть", self.load_db)
+        toolbar.addAction("🔄 Объединить", self.merge_db)  # НОВОЕ
+        toolbar.addAction("🆕 Новая БД", self.new_db)
+    def merge_db(self):
+        """Объединение текущей базы данных с другой"""
+        print("Начало объединения баз данных...")
+        
+        # Проверяем, есть ли студенты в текущей базе
+        if len(self.db.students) == 0:
+            reply = QMessageBox.question(
+                self,
+                "Пустая база данных",
+                "Текущая база данных пуста. Хотите просто загрузить другую базу?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.load_db()
+                return
+        
+        # Открываем диалог выбора файла для объединения
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите базу данных для объединения",
+            "",
+            "JSON файлы (*.json);;Все файлы (*)"
+        )
+        
+        if not file_path:
+            print("Объединение отменено: файл не выбран")
+            return
+        
+        try:
+            # Создаем временную базу данных для загрузки другой БД
+            temp_db = StudentDataBase()
+            
+            # Загружаем данные из выбранного файла
+            if not temp_db.load(file_path):
+                QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить базу данных из файла: {file_path}")
+                return
+            
+            print(f"Загружено {len(temp_db.students)} записей из файла {file_path}")
+            
+            if len(temp_db.students) == 0:
+                QMessageBox.information(self, "Информация", "Выбранная база данных пуста. Объединение не требуется.")
+                return
+            
+            # Запрашиваем у пользователя стратегию объединения
+            strategy = self.ask_merge_strategy()
+            if strategy is None:
+                print("Объединение отменено пользователем")
+                return
+            
+            # Определяем количество записей до объединения
+            before_merge = len(self.db.students)
+            
+            # Выполняем объединение
+            added, updated, skipped = self.db.merge_with(temp_db, strategy)
+            
+            # Определяем количество записей после объединения
+            after_merge = len(self.db.students)
+            
+            # Обновляем таблицу
+            self.update_table()
+            
+            # Показываем результаты
+            result_message = (
+                f"Объединение завершено!\n\n"
+                f"Исходное количество записей: {before_merge}\n"
+                f"Записей для объединения: {len(temp_db.students)}\n"
+                f"Добавлено новых: {added}\n"
+                f"Обновлено существующих: {updated}\n"
+                f"Пропущено: {skipped}\n"
+                f"Итоговое количество записей: {after_merge}"
+            )
+            
+            self.status_bar.showMessage(f"Базы объединены. Добавлено: {added}, Обновлено: {updated}")
+            QMessageBox.information(self, "Результат объединения", result_message)
+            
+            print(f"Объединение завершено. Добавлено: {added}, Обновлено: {updated}, Пропущено: {skipped}")
+            
+        except Exception as e:
+            print(f"Ошибка при объединении баз данных: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось объединить базы данных: {str(e)}")
+
+    def ask_merge_strategy(self):
+        """Запрашивает у пользователя стратегию объединения"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Стратегия объединения")
+        dialog.resize(400, 250)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Текст объяснения
+        label = QLabel(
+            "Выберите стратегию объединения записей с одинаковыми ID:\n\n"
+            "1. <b>Заменить</b> - заменить существующие записи новыми\n"
+            "2. <b>Пропустить</b> - сохранить существующие записи\n"
+            "3. <b>Сохранить обе</b> - создать новые записи с уникальными ID"
+        )
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        
+        # Группа радиокнопок
+        group_box = QGroupBox("Стратегия объединения")
+        group_layout = QVBoxLayout()
+        
+        self.replace_radio = QRadioButton("Заменить существующие записи")
+        self.skip_radio = QRadioButton("Пропустить существующие записи")
+        self.both_radio = QRadioButton("Сохранить обе записи (создать новые ID)")
+        
+        # Устанавливаем значение по умолчанию
+        self.replace_radio.setChecked(True)
+        
+        group_layout.addWidget(self.replace_radio)
+        group_layout.addWidget(self.skip_radio)
+        group_layout.addWidget(self.both_radio)
+        group_box.setLayout(group_layout)
+        layout.addWidget(group_box)
+        
+        # Кнопки
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        # Показываем диалог
+        result = dialog.exec()
+        
+        if result == QDialog.DialogCode.Accepted:
+            if self.replace_radio.isChecked():
+                return "replace"
+            elif self.skip_radio.isChecked():
+                return "skip"
+            elif self.both_radio.isChecked():
+                return "both"
+        
+        return None
 
 if __name__ == "__main__":
     print("Запуск приложения...")
